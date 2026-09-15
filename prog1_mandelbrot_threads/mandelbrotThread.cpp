@@ -32,21 +32,20 @@ void workerThreadStart(WorkerArgs * const args) {
 
 // TODO FOR CS149 STUDENTS: Implement the body of the worker
     // thread here. Each thread should make a call to mandelbrotSerial()
-    // to compute a part of the output image.
-
-    int startRow = (args->height * args->threadId) / args->numThreads;
-    int endRow = (args->height * (args->threadId + 1)) / args->numThreads;
-    int numRows = endRow - startRow;
-
     double startTime = CycleTimer::currentSeconds();
 
-    mandelbrotSerial(
-        args->x0, args->y0, args->x1, args->y1,
-        args->width, args->height,
-        startRow, numRows,
-        args->maxIterations,
-        args->output
-    );
+    for (int row = args->threadId;
+         row < (int)args->height;
+         row += args->numThreads) {
+
+        mandelbrotSerial(
+            args->x0, args->y0, args->x1, args->y1,
+            args->width, args->height,
+            row, 1,
+            args->maxIterations,
+            args->output
+        );
+    }
 
     double endTime = CycleTimer::currentSeconds();
 
@@ -55,7 +54,6 @@ void workerThreadStart(WorkerArgs * const args) {
            (endTime - startTime) * 1000.0);
 
 }
-
 //
 // MandelbrotThread --
 //
