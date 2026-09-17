@@ -64,32 +64,51 @@ double dist(double *x, double *y, int nDim) {
 /**
  * Assigns each data point to its "closest" cluster centroid.
  */
-void computeAssignments(WorkerArgs *const args) {
-  double *minDist = new double[args->M];
-  
-  // Initialize arrays
-  for (int m =0; m < args->M; m++) {
-    minDist[m] = 1e30;
-    args->clusterAssignments[m] = -1;
-  }
 
-  // Assign datapoints to closest centroids
-  for (int k = args->start; k < args->end; k++) {
-    for (int m = 0; m < args->M; m++) {
+void computeAssignmentsWorker(WorkerArgs *args, int pointStart, int pointEnd) {
+  for (int m = pointStart; m < pointEnd; m++) {
+    double minDist = 1e30;
+    int bestCluster = -1;
+
+    for (int k = 0; k < args->K; k++) {
       double d = dist(&args->data[m * args->N],
-                      &args->clusterCentroids[k * args->N], args->N);
-      if (d < minDist[m]) {
-        minDist[m] = d;
-        args->clusterAssignments[m] = k;
+                      &args->clusterCentroids[k * args->N],
+                      args->N);
+
+      if (d < minDist) {
+        minDist = d;
+        bestCluster = k;
       }
     }
+
+    args->clusterAssignments[m] = bestCluster;
+  }
+}
+
+
+void computeAssignments(WorkerArgs *const args) {
+  const int numThreads = 12;
+  thread workers[numThreads];
+
+  int pointsPerThread = args->M / numThreads;
+
+  for (int t = 0; t < numThreads; t++) {
+    int start = t * pointsPerThread;
+    int end = (t == numThreads - 1)
+                  ? args->M
+                  : start + pointsPerThread;
+
+    workers[t] =
+        thread(computeAssignmentsWorker, args, start, end);
   }
 
-  delete[] minDist;
+  for (int t = 0; t < numThreads; t++) {
+    workers[t].join();
+  }
 }
 
 /**
- * Given the cluster assignments, computes the new centroid locations for
+Given the cluster assignments, computes the new centroid locations for
  * each cluster.
  */
 void computeCentroids(WorkerArgs *const args) {
@@ -196,6 +215,10 @@ void kMeansThread(double *data, double *clusterCentroids, int *clusterAssignment
   }
 
   /* Main K-Means Algorithm Loop */
+double totalAssignmentsTime = 0.0;
+double totalCentroidsTime = 0.0;
+double totalCostTime = 0.0;
+
   int iter = 0;
   while (!stoppingConditionMet(prevCost, currCost, epsilon, K)) {
     // Update cost arrays (for checking convergence criteria)
@@ -207,12 +230,39 @@ void kMeansThread(double *data, double *clusterCentroids, int *clusterAssignment
     args.start = 0;
     args.end = K;
 
-    computeAssignments(&args);
-    computeCentroids(&args);
-    computeCost(&args);
+    double t1 = CycleTimer::currentSeconds();
+computeAssignments(&args);
+double t2 = CycleTimer::currentSeconds();
+
+computeCentroids(&args);
+double t3 = CycleTimer::currentSeconds();
+
+computeCost(&args);
+double t4 = CycleTimer::currentSeconds();
+
+totalAssignmentsTime += t2 - t1;
+totalCentroidsTime += t3 - t2;
+totalCostTime += t4 - t3;
+
+printf("Iteration %d timings: assignments=%.3f ms, centroids=%.3f ms, cost=%.3f ms\n",
+       iter,
+       (t2 - t1) * 1000.0,
+       (t3 - t2) * 1000.0,
+       (t4 - t3) * 1000.0);
 
     iter++;
   }
+
+
+double measuredTotal =
+    totalAssignmentsTime + totalCentroidsTime + totalCostTime;
+
+printf("\nProfiling totals:\n");
+printf("Assignments: %.3f ms\n", totalAssignmentsTime * 1000.0);
+printf("Centroids:   %.3f ms\n", totalCentroidsTime * 1000.0);
+printf("Cost:        %.3f ms\n", totalCostTime * 1000.0);
+printf("Hotspot fraction f: %.6f\n",
+       totalAssignmentsTime / measuredTotal);
 
   delete[] currCost;
   delete[] prevCost;
